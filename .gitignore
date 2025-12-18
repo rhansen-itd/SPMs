@@ -1,0 +1,12 @@
+# 1. Ignore EVERYTHING in the root folder
+/*
+
+# 2. But do NOT ignore the .gitignore file itself
+!.gitignore
+
+# 3. And do NOT ignore the Notebooks folder and everything inside it
+!Notebooks/
+Notebooks/*.ppk
+
+# 4. If you want a specific "Sample Data" file later, allow it specifically
+# !Intersections/.../sample_data.csv
