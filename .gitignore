@@ -3,6 +3,7 @@
 
 # 2. But do NOT ignore the .gitignore file itself
 !.gitignore
+!requirements.txt
 
 # 3. And do NOT ignore the Notebooks folder and everything inside it
 !Notebooks/
