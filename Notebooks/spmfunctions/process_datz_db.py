@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 # --- Configuration ---
 DEFAULT_STATE_FILE = 'processing_state.json'
-DEFAULT_DB_FILE = 'traffic_logs.db'
+DEFAULT_DB_FILE = 'spm_data.db'
 
 # --- 1. Helper Functions ---
 
@@ -212,6 +212,6 @@ if __name__ == "__main__":
     # Example usage
     # Ensure 'data' folder exists or change path
     if os.path.exists('./data'):
-        process_datz_batch('./data', 'traffic_logs.db')
+        process_datz_batch('./data', 'spm_data.db')
     else:
         print("Please set input directory path.")
