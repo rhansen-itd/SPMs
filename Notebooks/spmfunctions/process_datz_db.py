@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 # --- Configuration ---
 DEFAULT_STATE_FILE = 'processing_state.json'
 DEFAULT_DB_FILE = 'spm_data.db'
+INTERVAL_MINUTES = 1
 
 # --- 1. Helper Functions ---
 
@@ -171,15 +172,15 @@ def process_datz_batch(input_dir, output_db=DEFAULT_DB_FILE, state_file=DEFAULT_
         
         # --- Continuity Logic (Gap Detection) ---
         if current_batch_last_time is not None:
-            expected_next = current_batch_last_time + timedelta(minutes=1)
+            expected_next = current_batch_last_time + timedelta(minutes=INTERVAL_MINUTES)
             
             if file_ts > expected_next:
                 print(f"  -> Gap detected: {current_batch_last_time} -> {file_ts}")
                 
-                # Insert Break Record (0, 0)
+                # Insert Break Record (-1, -1)
                 # Use the START of the new file's minute as the timestamp
                 break_ts_val = to_utc_epoch(file_ts)
-                new_records.append((break_ts_val, 0, 0))
+                new_records.append((break_ts_val, -1, -1))
         
         # --- Decode File ---
         file_rows = decode_single_file(filepath, file_ts)
