@@ -212,7 +212,12 @@ def process_datz_batch(input_dir, output_db=DEFAULT_DB_FILE, state_file=DEFAULT_
 if __name__ == "__main__":
     # Example usage
     # Ensure 'data' folder exists or change path
-    if os.path.exists('./data'):
-        process_datz_batch('./data', 'spm_data.db')
+    WD = 'C:\\Users\\rhansen\\Documents\\Python\\SPMs\\Intersections\\Franklin & Ward\\Data'
+    DATZ_PATH = 'G:\\Python\\SPM_Data_Archive\\Intersections\\Franklin & Ward\\Data\\DATZ\\Archive'
+    #DATZ_PATH = './datz'
+    DB_PATH = 'spm_data.db'
+    os.chdir(WD)
+    if os.path.exists(DATZ_PATH):
+        process_datz_batch(DATZ_PATH, DB_PATH)
     else:
         print("Please set input directory path.")
