@@ -13,20 +13,27 @@ CSV_COL_CODE = 'Event Code'
 CSV_COL_DESC = 'Event Description'
 CSV_COL_PARAM = 'Event Parameter'
 
-# Database Output Columns (Matches process_datz_db.py)
+# Database Output Columns
 DB_COL_TIMESTAMP = 'timestamp'
 DB_COL_EVENT = 'event_type'
 DB_COL_PARAM = 'parameter'
 
 def init_db(db_path):
-    """Initialize SQLite DB with the same schema as process_datz_db."""
+    """
+    Initialize SQLite DB.
+    Adds a UNIQUE constraint to automatically reject duplicate rows
+    that might occur from overlapping CSV files.
+    """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+    # Create table with UNIQUE constraint -> ON CONFLICT IGNORE
+    # This prevents duplicates if file ranges overlap.
     c.execute('''
         CREATE TABLE IF NOT EXISTS logs (
             timestamp REAL, 
             event_type INTEGER,
-            parameter INTEGER
+            parameter INTEGER,
+            UNIQUE(timestamp, event_type, parameter) ON CONFLICT IGNORE
         )
     ''')
     c.execute('CREATE INDEX IF NOT EXISTS idx_ts ON logs (timestamp)')
@@ -34,10 +41,7 @@ def init_db(db_path):
     return conn
 
 def to_utc_epoch(dt_obj):
-    """
-    Converts a naive datetime (assumed Mountain Time) to UTC epoch.
-    Matches logic in process_datz_db.py.
-    """
+    """Converts naive Mountain Time datetime to UTC epoch."""
     mst_tz = pytz.timezone('US/Mountain')
     dt_aware = mst_tz.localize(dt_obj)
     return dt_aware.timestamp()
@@ -45,7 +49,7 @@ def to_utc_epoch(dt_obj):
 def parse_file_metadata(filepath):
     """
     Reads the first few lines of the CSV to extract Start and End times.
-    Handles headers like: Start time,"Sunday, 30 July 2023 00:00:00",
+    Robustly splits by quotes to handle trailing commas.
     """
     meta = {'filepath': filepath, 'start': None, 'end': None}
     try:
@@ -53,7 +57,6 @@ def parse_file_metadata(filepath):
             lines = [f.readline() for _ in range(3)]
             
         # Parse Start Time (Line 2)
-        # Split by " to extract the date string safely between quotes
         if '"' in lines[1]:
             start_str = lines[1].split('"')[1]
             meta['start'] = datetime.strptime(start_str, "%A, %d %B %Y %H:%M:%S")
@@ -71,10 +74,10 @@ def parse_file_metadata(filepath):
 def filter_files(file_list):
     """
     Removes files whose date ranges are fully contained within other files.
+    (Partial overlaps are handled by the DB constraint).
     """
-    # Sort by start time, then end time (descending) to prefer longer durations
+    # Sort by start time, then end time (descending)
     sorted_files = sorted(file_list, key=lambda x: (x['start'], -x['end'].timestamp()))
-    
     keep_indices = set(range(len(sorted_files)))
     
     for i in range(len(sorted_files)):
@@ -86,7 +89,6 @@ def filter_files(file_list):
             if j not in keep_indices: continue
             
             other = sorted_files[j]
-            
             # Check if 'other' is fully contained within 'current'
             if current['start'] <= other['start'] and current['end'] >= other['end']:
                 keep_indices.discard(j)
@@ -94,20 +96,17 @@ def filter_files(file_list):
     return [sorted_files[i] for i in sorted(list(keep_indices))]
 
 def process_csv_directory(input_dir, output_dir):
-    """
-    Main workflow: Scan -> Filter -> Analyze Continuity -> Process -> Save DB
-    """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     # 1. Identify Intersections
-    # Pattern: [IntersectionNumber]_Events_[Timestamp].csv
     all_files = glob.glob(os.path.join(input_dir, "*_Events_*.csv"))
     intersection_map = {}
     
     for f in all_files:
         filename = os.path.basename(f)
         try:
+            # Assumes format: [IntersectionID]_Events_...
             intersection_id = filename.split('_')[0]
             if intersection_id not in intersection_map:
                 intersection_map[intersection_id] = []
@@ -117,7 +116,7 @@ def process_csv_directory(input_dir, output_dir):
 
     print(f"Found {len(intersection_map)} intersections.")
 
-    # 2. Loop through each intersection
+    # 2. Process Each Intersection
     for int_id, file_paths in intersection_map.items():
         print(f"Processing Intersection {int_id}...")
         
@@ -128,27 +127,27 @@ def process_csv_directory(input_dir, output_dir):
             if m: raw_meta.append(m)
             
         valid_files = filter_files(raw_meta)
-        valid_files.sort(key=lambda x: x['start']) # Ensure chronological order
+        valid_files.sort(key=lambda x: x['start']) 
         
         if not valid_files:
-            print(f"No valid files for {int_id}")
             continue
 
-        # --- Continuity Analysis & JSON Generation ---
+        # --- Continuity Analysis ---
         ranges_report = []
-        discontinuities = [] # List of start times where a gap precedes them
-        
+        discontinuities = [] 
         prev_end = None
         
         for f in valid_files:
             current_start = f['start']
             current_end = f['end']
-            
             is_continuous = True
+            
             if prev_end:
-                # Continuous if start is roughly prev_end + 1 second
-                # Using 1.5s buffer to allow for standard midnight rollover
+                # Check for gap (allow 1.5s buffer for daily rollover)
                 diff = (current_start - prev_end).total_seconds()
+                
+                # If negative, it's an overlap (DB handles this).
+                # If > 1.5, it's a gap.
                 if diff > 1.5: 
                     is_continuous = False
                     discontinuities.append(current_start)
@@ -159,7 +158,6 @@ def process_csv_directory(input_dir, output_dir):
                 "end": current_end.isoformat(),
                 "continuous_with_prev": is_continuous
             })
-            
             prev_end = current_end
 
         # Save JSON Report
@@ -167,48 +165,33 @@ def process_csv_directory(input_dir, output_dir):
         with open(json_path, 'w') as jf:
             json.dump(ranges_report, jf, indent=4)
 
-        # --- Process DataFrames & Database ---
+        # --- Database Insertion ---
         db_name = f"{int_id}_data.db"
         db_path = os.path.join(output_dir, db_name)
-        conn = init_db(db_path) # Create DB
+        conn = init_db(db_path)
         
         for file_info in valid_files:
             fp = file_info['filepath']
-            
             try:
-                # Read CSV (Header is on line 5)
+                # Load CSV (Skip 4 metadata lines)
                 df = pd.read_csv(fp, skiprows=4)
-                
-                # Clean column names (strip spaces)
                 df.columns = [c.strip() for c in df.columns]
                 
                 if CSV_COL_TIME not in df.columns:
-                    print(f"Skipping {fp}: Header mismatch. Found {df.columns}")
+                    print(f"Skipping {fp}: Header mismatch")
                     continue
 
-                # Parse Timestamp
+                # Parse Timestamps & Convert to UTC
                 df[DB_COL_TIMESTAMP] = pd.to_datetime(df[CSV_COL_TIME], format='%m/%d/%y %H:%M:%S.%f')
-                
-                # Convert to UTC Epoch (float)
                 df[DB_COL_TIMESTAMP] = df[DB_COL_TIMESTAMP].apply(to_utc_epoch)
 
-                # Rename columns
-                df = df.rename(columns={
-                    CSV_COL_CODE: DB_COL_EVENT,
-                    CSV_COL_PARAM: DB_COL_PARAM
-                })
-                
-                # Keep only DB columns
-                df = df[[DB_COL_TIMESTAMP, DB_COL_EVENT, DB_COL_PARAM]]
-                
-                # Drop Duplicates
-                df = df.drop_duplicates()
+                # Rename & Clean
+                df = df.rename(columns={CSV_COL_CODE: DB_COL_EVENT, CSV_COL_PARAM: DB_COL_PARAM})
+                df = df[[DB_COL_TIMESTAMP, DB_COL_EVENT, DB_COL_PARAM]].drop_duplicates()
 
-                # --- Insert Discontinuity Marker ---
+                # --- Insert Gap Record ---
                 if file_info['start'] in discontinuities:
-                    # Calculate gap timestamp (start of this file)
                     gap_ts = to_utc_epoch(file_info['start'])
-                    
                     gap_row = pd.DataFrame([{
                         DB_COL_TIMESTAMP: gap_ts, 
                         DB_COL_EVENT: -1, 
@@ -216,20 +199,21 @@ def process_csv_directory(input_dir, output_dir):
                     }])
                     df = pd.concat([gap_row, df], ignore_index=True)
 
-                # Append to DB
+                # Write to DB
+                # Note: We rely on the DB's UNIQUE constraint to ignore duplicates.
+                # pandas 'append' works fine; SQLite just ignores the conflicting rows.
                 df.to_sql('logs', conn, if_exists='append', index=False)
                 
             except Exception as e:
-                print(f"Failed processing data for {fp}: {e}")
+                print(f"Failed processing {fp}: {e}")
 
         conn.close()
         print(f"Saved {db_name}")
 
-
 if __name__ == "__main__":
     # Configure paths
     INPUT_DIRECTORY = 'G:\\Python\\SPM_Data_Archive\\ACHD_Data\\Archive'
-    OUTPUT_DIRECTORY = '../processed_dbs'
+    OUTPUT_DIRECTORY = './Notebooks/processed_dbs'
     
     if os.path.exists(INPUT_DIRECTORY):
         process_csv_directory(INPUT_DIRECTORY, OUTPUT_DIRECTORY)

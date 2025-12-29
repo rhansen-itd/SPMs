@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 # --- Configuration ---
 DEFAULT_STATE_FILE = 'processing_state.json'
 DEFAULT_DB_FILE = 'spm_data.db'
-INTERVAL_MINUTES = 1
+INTERVAL_MINUTES = 15
 
 # --- 1. Helper Functions ---
 
@@ -212,9 +212,13 @@ def process_datz_batch(input_dir, output_db=DEFAULT_DB_FILE, state_file=DEFAULT_
 if __name__ == "__main__":
     # Example usage
     # Ensure 'data' folder exists or change path
-    WD = 'C:\\Users\\rhansen\\Documents\\Python\\SPMs\\Intersections\\Franklin & Ward\\Data'
-    DATZ_PATH = 'G:\\Python\\SPM_Data_Archive\\Intersections\\Franklin & Ward\\Data\\DATZ\\Archive'
-    #DATZ_PATH = './datz'
+    WD = 'C:\\Users\\rhansen\\Documents\\Python\\SPMs\\Intersections\\316 Franklin & KCID\\Data'
+    DATZ_PATH = 'G:\\Python\\SPM_Data_Archive\\Intersections\\Franklin & KCID\\Data\\DATZ\\Archive'
+
+    #WD = 'C:\\Users\\rhansen\\Documents\\Python\\SPMs\\Intersections\\Franklin & Ward\\Data'
+    #DATZ_PATH = 'G:\\Python\\SPM_Data_Archive\\Intersections\\Franklin & Ward\\Data\\DATZ\\Archive'
+    
+    #DATZ_PATH = './datz/archive'
     DB_PATH = 'spm_data.db'
     os.chdir(WD)
     if os.path.exists(DATZ_PATH):
